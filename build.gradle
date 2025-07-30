@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.4'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco' 
 }
 
 group = 'com.fisa'
@@ -15,6 +16,21 @@ java {
 
 repositories {
     mavenCentral()
+}
+
+jacoco {
+    toolVersion = "0.8.12" // Java 21도 호환되는 최신 계열
+}
+
+tasks.jacocoTestReport {
+    dependsOn tasks.test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+        // SonarQube 붙일 계획이면 xml 경로를 명시해두면 좋아요
+        xml.outputLocation = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
+    }
 }
 
 dependencies {
