@@ -2,7 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.4'
     id 'io.spring.dependency-management' version '1.1.7'
-    id 'jacoco' 
+    id 'jacoco'
 }
 
 group = 'com.fisa'
@@ -10,16 +10,22 @@ version = '0.0.1-SNAPSHOT'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(21) // JDK 21
     }
 }
 
 repositories {
     mavenCentral()
 }
-ss
+
+// ✅ JaCoCo 설정 (JDK 21 호환 버전)
 jacoco {
-    toolVersion = "0.8.12" // Java 21도 호환되는 최신 계열
+    toolVersion = "0.8.12"
+}
+
+tasks.test {
+    useJUnitPlatform()
+    finalizedBy tasks.jacocoTestReport // 테스트 후 리포트 자동 생성
 }
 
 tasks.jacocoTestReport {
@@ -28,19 +34,17 @@ tasks.jacocoTestReport {
         xml.required = true
         html.required = true
         csv.required = false
-        // SonarQube 붙일 계획이면 xml 경로를 명시해두면 좋아요
+        // (향후 SonarQube 예정 시) XML 명시
         xml.outputLocation = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
     }
 }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter'
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
-
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
     runtimeOnly 'org.postgresql:postgresql'
     runtimeOnly 'com.h2database:h2'
 
@@ -51,8 +55,4 @@ dependencies {
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-}
-
-tasks.named('test') {
-    useJUnitPlatform()
 }
