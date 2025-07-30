@@ -10,14 +10,14 @@ version = '0.0.1-SNAPSHOT'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
 repositories {
     mavenCentral()
 }
-
+ss
 jacoco {
     toolVersion = "0.8.12" // Java 21도 호환되는 최신 계열
 }
