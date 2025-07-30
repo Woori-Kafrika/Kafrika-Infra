@@ -7,20 +7,23 @@ pipeline {
     skipDefaultCheckout(true)
   }
 
+  // GitHub Webhook을 이미 연결했다면 유지하세요.
+  // Webhook을 아직 안 쓴다면 아래 triggers 블록은 삭제해도 됩니다.
   triggers {
-    // 원하면 Webhook 연결 후 주석 해제
-    // githubPush()
-  }
-
-  tools {
-    // Jenkins > Global Tool Configuration 에 미리 JDK 17(또는 11) 등록해 두세요. (예: temurin-17)
-    jdk 'temurin-17'
+    githubPush()
   }
 
   stages {
     stage('Checkout') {
       steps {
         checkout scm
+      }
+    }
+
+    stage('Check Java') {
+      steps {
+        sh 'echo "JAVA_HOME=$JAVA_HOME"'
+        sh 'java -version || true'
       }
     }
 
@@ -44,7 +47,6 @@ pipeline {
 
     stage('Archive Artifacts') {
       steps {
-        // JAR 위치는 프로젝트 구조에 맞게 조정
         archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true
       }
     }
