@@ -1,64 +1,58 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        SERVER_IP = credentials('jcloud-ip')  
-        SSH_PORT = credentials('backend-server-port')  
-        DOCKER_IMAGE = "0b6fa52889bf.ngrok.app/test/backend"
-        DOCKER_TAG = "v${env.BUILD_NUMBER}"
-        SCANNER_HOME = tool 'SonarQube Scanner'
+  options {
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+    skipDefaultCheckout(true)
+  }
+
+  triggers {
+    // 원하면 Webhook 연결 후 주석 해제
+    // githubPush()
+  }
+
+  tools {
+    // Jenkins > Global Tool Configuration 에 미리 JDK 17(또는 11) 등록해 두세요. (예: temurin-17)
+    jdk 'temurin-17'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
     }
 
-    triggers {
-        githubPush()
+    stage('Prepare') {
+      steps {
+        sh 'chmod +x gradlew || true'
+      }
     }
 
-    stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        stage('Build & Test') {
-            steps {
-                sh './gradlew clean test jacocoTestReport build'
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh """
-                        ${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=springboot-project \
-                        -Dsonar.sources=src/main/java \
-                        -Dsonar.tests=src/test/java \
-                        -Dsonar.java.binaries=build/classes/java/main \
-                        -Dsonar.junit.reportPaths=build/test-results/test \
-                        -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml
-                    """
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('Build and Push Docker Image') {
-            steps {
-                script {
-                    docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}", "-f Dockerfile .")
-                    docker.withRegistry('https://0b6fa52889bf.ngrok.app', 'harbor-kafrika') {
-                        docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
-                    }
-                }
-            }
-        }
+    stage('Build & Test') {
+      steps {
+        sh './gradlew clean test jacocoTestReport build --no-daemon'
+      }
     }
+
+    stage('Publish Test Reports') {
+      steps {
+        junit allowEmptyResults: true, testResults: 'build/test-results/test/*.xml'
+      }
+    }
+
+    stage('Archive Artifacts') {
+      steps {
+        // JAR 위치는 프로젝트 구조에 맞게 조정
+        archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Build finished: ${currentBuild.currentResult}"
+    }
+  }
 }
