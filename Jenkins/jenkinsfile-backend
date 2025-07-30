@@ -3,14 +3,13 @@ pipeline {
 
   options {
     timestamps()
-    buildDiscarder(logRotator(numToKeepStr: '20'))
-    skipDefaultCheckout(true)
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    skipDefaultCheckout(false)
   }
 
-  // GitHub Webhook을 이미 연결했다면 유지하세요.
-  // Webhook을 아직 안 쓴다면 아래 triggers 블록은 삭제해도 됩니다.
-  triggers {
-    githubPush()
+  environment {
+    SONAR_TOKEN = credentials('sonar-token')
+    SONAR_HOST_URL = 'http://localhost:9000'
   }
 
   stages {
@@ -23,25 +22,53 @@ pipeline {
     stage('Check Java') {
       steps {
         sh 'echo "JAVA_HOME=$JAVA_HOME"'
-        sh 'java -version || true'
+        sh 'java -version'
       }
     }
 
     stage('Prepare') {
       steps {
-        sh 'chmod +x gradlew || true'
+        sh 'chmod +x gradlew'
       }
     }
 
-    stage('Build & Test') {
+    stage('Build') {
       steps {
-        sh './gradlew clean test jacocoTestReport build --no-daemon'
+        sh './gradlew clean build --no-daemon'
       }
     }
 
-    stage('Publish Test Reports') {
+    stage('Test') {
       steps {
-        junit allowEmptyResults: true, testResults: 'build/test-results/test/*.xml'
+        sh './gradlew test jacocoTestReport --no-daemon'
+      }
+    }
+
+    stage('SonarQube Analysis') {
+      steps {
+        withSonarQubeEnv('SonarQube') {
+          sh '''
+            ./gradlew sonarqube \
+              -Dsonar.projectKey=kafrika-backend \
+              -Dsonar.projectName="Kafrika Backend" \
+              -Dsonar.projectVersion=1.0 \
+              -Dsonar.sources=src/main/java \
+              -Dsonar.tests=src/test/java \
+              -Dsonar.java.binaries=build/classes \
+              -Dsonar.java.test.binaries=build/test-classes \
+              -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
+              -Dsonar.host.url=''' + env.SONAR_HOST_URL + ''' \
+              -Dsonar.login=''' + env.SONAR_TOKEN + '''
+          '''
+        }
+      }
+    }
+
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 1, unit: 'MINUTES') {
+          waitForQualityGate abortPipeline: true
+        }
       }
     }
 
@@ -55,6 +82,12 @@ pipeline {
   post {
     always {
       echo "Build finished: ${currentBuild.currentResult}"
+    }
+    success {
+      echo "✅ 빌드 성공!"
+    }
+    failure {
+      echo "❌ 빌드 실패!"
     }
   }
 }
