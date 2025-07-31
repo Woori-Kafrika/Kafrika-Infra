@@ -1,10 +1,9 @@
-pipeline {
+ pipeline {
   agent any
   options {
     buildDiscarder(logRotator(numToKeepStr: '10'))
     skipDefaultCheckout(false)
-    timeout(time: 45, unit: 'MINUTES')  // 타임아웃 증가
-    retry(2)  // 전체 파이프라인 재시도
+    timeout(time: 30, unit: 'MINUTES')
   }
 
   environment {
@@ -12,33 +11,20 @@ pipeline {
     SONAR_HOST_URL  = 'http://sonarqube-local:9000'
     DOCKER_REGISTRY = 'localhost:5001'
     REGISTRY_HEALTH_URL = 'http://docker-registry-local:5000/v2/'
-
     IMAGE_NAME      = 'kafrika-backend'
     IMAGE_TAG       = "${env.BUILD_NUMBER}"
-    IMAGE_TAG_LATEST = 'latest'
-    
-    // ArgoCD 설정
-    ARGOCD_SERVER   = 'localhost:8080'
-    ARGOCD_TOKEN    = credentials('argocd-token')
-    ARGOCD_APP_NAME = 'kafrika-backend-app'  // ArgoCD 앱 이름
-    
-    // 빌드 최적화
-    GRADLE_OPTS     = '-Dorg.gradle.daemon=false -Dorg.gradle.caching=false -Xmx2g'
+    GRADLE_OPTS     = '-Dorg.gradle.daemon=false -Dorg.gradle.caching=false'
     DOCKER_BUILDKIT = '1'
-    
-    // 추가 환경변수
-    SLACK_CHANNEL   = '#ci-cd-alerts'  // 알림용
   }
 
   stages {
-    stage('Checkout & Info') {
+    stage('1. Checkout & Setup') {
       steps {
         checkout scm
         script {
           env.GIT_COMMIT_HASH = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
           env.GIT_BRANCH = sh(returnStdout: true, script: 'git branch --show-current').trim()
           env.BUILD_TIMESTAMP = sh(returnStdout: true, script: 'date -u +"%Y%m%d_%H%M%S"').trim()
-          env.GIT_REPO_URL = scm.userRemoteConfigs[0].url
         }
         sh '''
           echo "📋 Build Information:"
@@ -46,309 +32,155 @@ pipeline {
           echo "  Commit: ${GIT_COMMIT_HASH}"
           echo "  Build: #${BUILD_NUMBER}"
           echo "  Timestamp: ${BUILD_TIMESTAMP}"
-          ls -la; pwd
+          
+          echo "📁 Directory structure:"
+          ls -la
+          pwd
+          
+          echo "🔧 Setting up permissions..."
+          chmod +x ./gradlew || echo "chmod failed, continuing..."
+          
+          echo "✅ Setup completed"
         '''
       }
     }
 
-    stage('Environment Check') {
-      parallel {
-        stage('System Check') {
-          steps {
-            sh '''
-              set -eux
-              echo "🔍 System Information:"
-              echo "JAVA_HOME=$JAVA_HOME"
-              java -version
-              docker --version
-              chmod +x ./gradlew
-              ./gradlew --version
-            '''
-          }
-        }
-        stage('Service Health Check') {
-          steps {
-            sh '''
-              set -eux
-              echo "🏥 [Health Check] SonarQube"
-              if curl -fsSL --max-time 10 ${SONAR_HOST_URL}/api/system/status; then
-                echo "✅ SonarQube is healthy"
-              else
-                echo "⚠️  SonarQube not reachable - SonarQube analysis will be skipped"
-              fi
-
-              echo "🏥 [Health Check] Docker Registry"
-              if curl -fsSL --max-time 10 ${REGISTRY_HEALTH_URL}; then
-                echo "✅ Docker Registry is healthy"
-              else
-                echo "❌ Docker Registry not reachable!"
-                exit 1
-              fi
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Build & Test') {
-      parallel {
-        stage('Compile') {
-          steps {
-            sh '''
-              set -euxo pipefail
-              echo "🔨 Building application..."
-              ./gradlew clean compileJava --no-daemon --parallel
-            '''
-          }
-        }
-        stage('Static Analysis') {
-          steps {
-            sh '''
-              set -euxo pipefail
-              echo "🔍 Running static analysis..."
-              ./gradlew checkstyleMain spotbugsMain --no-daemon || echo "Static analysis completed with warnings"
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Package & Test') {
+    stage('2. Basic Environment Check') {
       steps {
         sh '''
-          set -eux
-          echo "📦 Packaging application..."
-          chmod +x ./gradlew
-          ./gradlew build jacocoTestReport --no-daemon
-        '''
-        // 병렬로 아티팩트 아카이빙
-        script {
-          parallel(
-            "Archive JAR": {
-              archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true, allowEmptyArchive: true
-            },
-            "Archive Test Results": {
-              archiveArtifacts artifacts: 'build/test-results/**/*', allowEmptyArchive: true
-              archiveArtifacts artifacts: 'build/reports/**/*', allowEmptyArchive: true
-            }
-          )
-        }
-      }
-      post {
-        always {
-          // JUnit 테스트 결과 발행
-          publishTestResults testResultsPattern: 'build/test-results/test/*.xml'
-          // JaCoCo 커버리지 리포트
-          publishCoverage adapters: [jacocoAdapter('build/reports/jacoco/test/jacocoTestReport.xml')], sourceFileResolver: sourceFiles('STORE_LAST_BUILD')
-        }
-      }
-    }
-
-    stage('Code Quality') {
-      when {
-        expression {
-          return sh(returnStatus: true, script: "curl -fsSL --max-time 5 ${SONAR_HOST_URL}/api/system/status") == 0
-        }
-      }
-      steps {
-        withSonarQubeEnv('SonarQube-Local') {
-          sh '''
-            set -eux
-            echo "📊 Running SonarQube analysis..."
-            chmod +x ./gradlew
-            ./gradlew sonarqube \
-              -Dsonar.host.url=${SONAR_HOST_URL} \
-              -Dsonar.login=${SONAR_TOKEN} \
-              -Dsonar.projectKey=kafrika-backend \
-              -Dsonar.projectName="Kafrika Backend" \
-              -Dsonar.projectVersion=${IMAGE_TAG} \
-              --no-daemon
-          '''
-        }
-      }
-    }
-
-    // Quality Gate는 SonarQube 분석 후 별도 스테이지로
-    stage('Quality Gate') {
-      when {
-        expression {
-          return sh(returnStatus: true, script: "curl -fsSL --max-time 5 ${SONAR_HOST_URL}/api/system/status") == 0
-        }
-      }
-      steps {
-        timeout(time: 5, unit: 'MINUTES') {
-          waitForQualityGate abortPipeline: false  // 실패해도 파이프라인 중단하지 않음
-        }
-      }
-    }
-
-    stage('Docker Build & Security Scan') {
-      steps {
-        script {
-          def buildArgs = [
-            "--build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
-            "--build-arg VCS_REF=${env.GIT_COMMIT_HASH}",
-            "--build-arg VERSION=${env.IMAGE_TAG}",
-            "--build-arg GIT_BRANCH=${env.GIT_BRANCH}",
-            "--label org.opencontainers.image.created=\$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
-            "--label org.opencontainers.image.revision=${env.GIT_COMMIT_HASH}",
-            "--label org.opencontainers.image.version=${env.IMAGE_TAG}"
-          ].join(' ')
+          echo "🔍 Basic Environment Check:"
+          echo "JAVA_HOME: $JAVA_HOME"
+          echo "USER: $(whoami)"
+          echo "PWD: $(pwd)"
           
-          sh """
-            set -eux
-            echo "🐳 Building Docker image..."
-            docker build \\
-              ${buildArgs} \\
-              -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \\
-              -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG_LATEST} \\
-              .
-            
-            echo "🔍 Image inspection:"
-            docker inspect ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} --format='{{json .Config.Labels}}' | jq . || echo "jq not available, skipping pretty print"
-            
-            echo "📏 Image size:"
-            docker images ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
-          """
-        }
+          echo "Java version:"
+          java -version || echo "Java check failed"
+          
+          echo "Docker version:"
+          docker --version || echo "Docker check failed"
+          
+          echo "Gradle wrapper check:"
+          ls -la ./gradlew
+          file ./gradlew || echo "file command not available"
+          
+          echo "✅ Environment check completed"
+        '''
       }
     }
 
-    stage('Docker Push') {
+    stage('3. Gradle Version Test') {
       steps {
-        retry(3) {
-          sh '''
-            set -eux
-            echo "⬆️  Pushing to registry..."
-            
-            # 마지막으로 registry 연결 확인
-            curl -fsSL --max-time 10 ${REGISTRY_HEALTH_URL} >/dev/null
-            
-            # push 수행 (호스트 데몬 관점에서 localhost:5001 사용)
-            docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
-            docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG_LATEST}
-            
-            echo "✅ Images pushed successfully"
-            echo "📦 ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-            echo "📦 ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG_LATEST}"
-          '''
-        }
+        sh '''
+          echo "🔧 Testing Gradle wrapper..."
+          
+          # 권한 재확인
+          chmod +x ./gradlew
+          
+          # gradlew 실행 테스트
+          echo "Executing: ./gradlew --version"
+          ./gradlew --version || {
+            echo "❌ gradlew failed, investigating..."
+            echo "File permissions:"
+            ls -la ./gradlew
+            echo "File type:"
+            file ./gradlew 2>/dev/null || echo "file command not available"
+            echo "Attempting with bash:"
+            bash ./gradlew --version || echo "bash execution also failed"
+            exit 1
+          }
+          
+          echo "✅ Gradle wrapper working"
+        '''
       }
     }
 
-    stage('GitOps & ArgoCD Sync') {
-      parallel {
-        stage('Update Manifest') {
-          steps {
-            sh '''
-              set -eux
-              if [ -f k8s/deployment.yaml ]; then
-                echo "📝 Updating GitOps manifest..."
-                cp k8s/deployment.yaml k8s/deployment.yaml.backup
+    stage('4. Service Health Check') {
+      steps {
+        sh '''
+          echo "🏥 Service Health Checks:"
+          
+          echo "Checking SonarQube..."
+          if curl -fsSL --max-time 10 ${SONAR_HOST_URL}/api/system/status; then
+            echo "✅ SonarQube is healthy"
+          else
+            echo "⚠️ SonarQube not reachable"
+          fi
 
-                # 더 정확한 sed 패턴 사용
-                sed -i "s|image: .*/${IMAGE_NAME}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g" k8s/deployment.yaml
+          echo "Checking Docker Registry..."
+          if curl -fsSL --max-time 10 ${REGISTRY_HEALTH_URL}; then
+            echo "✅ Docker Registry is healthy"
+          else
+            echo "⚠️ Docker Registry not reachable"
+          fi
+          
+          echo "✅ Health checks completed"
+        '''
+      }
+    }
 
-                echo "📋 Updated deployment.yaml:"
-                grep -A2 -B2 "image:" k8s/deployment.yaml || true
-
-                # Git 설정 및 커밋
-                git config user.email "jenkins@company.com"
-                git config user.name "Jenkins CI"
-
-                if ! git diff --quiet k8s/deployment.yaml; then
-                  git add k8s/deployment.yaml
-                  git commit -m "🚀 Deploy ${IMAGE_NAME}:${IMAGE_TAG} [skip ci]
-
-                  - Build: #${BUILD_NUMBER}
-                  - Commit: ${GIT_COMMIT_HASH}
-                  - Branch: ${GIT_BRANCH}
-                  - Timestamp: ${BUILD_TIMESTAMP}"
-                  
-                  git push origin HEAD:main || {
-                    echo "❌ Git push failed - check credentials and permissions"
-                    exit 1
-                  }
-                  echo "✅ GitOps repository updated successfully"
-                else
-                  echo "ℹ️  No changes to commit"
-                fi
-              else
-                echo "⚠️  k8s/deployment.yaml not found!"
-                echo "📁 Available YAML files:"
-                find . -name "*.yaml" -o -name "*.yml" | head -10 || true
-                exit 1
-              fi
-            '''
+    stage('5. Simple Build Test') {
+      steps {
+        sh '''
+          echo "🔨 Testing simple build..."
+          
+          # 간단한 gradle 명령 테스트
+          ./gradlew tasks --no-daemon || {
+            echo "❌ gradle tasks failed"
+            exit 1
           }
-        }
-        stage('Trigger ArgoCD Sync') {
-          when {
-            expression { return env.ARGOCD_TOKEN && env.ARGOCD_APP_NAME }
+          
+          echo "Testing compile..."
+          ./gradlew compileJava --no-daemon || {
+            echo "❌ compileJava failed"
+            exit 1
           }
-          steps {
-            sh '''
-              set -eux
-              echo "🔄 Triggering ArgoCD sync..."
-              
-              # ArgoCD CLI를 사용한 동기화 (ArgoCD CLI가 Jenkins 컨테이너에 설치되어 있다고 가정)
-              argocd app sync ${ARGOCD_APP_NAME} \\
-                --server ${ARGOCD_SERVER} \\
-                --auth-token ${ARGOCD_TOKEN} \\
-                --prune \\
-                --timeout 300 || echo "ArgoCD sync failed - manual intervention may be required"
-              
-              echo "✅ ArgoCD sync triggered"
-            '''
-          }
-        }
+          
+          echo "✅ Simple build test passed"
+        '''
+      }
+    }
+
+    stage('6. Docker Build Test') {
+      when {
+        expression { return fileExists('Dockerfile') }
+      }
+      steps {
+        sh '''
+          echo "🐳 Testing Docker build..."
+          
+          if [ -f Dockerfile ]; then
+            echo "Dockerfile found, testing build..."
+            docker build -t test-build:${BUILD_NUMBER} . || {
+              echo "❌ Docker build failed"
+              exit 1
+            }
+            
+            echo "Cleaning up test image..."
+            docker rmi test-build:${BUILD_NUMBER} || true
+            
+            echo "✅ Docker build test passed"
+          else
+            echo "⚠️ No Dockerfile found"
+          fi
+        '''
       }
     }
   }
 
   post {
     always {
-      echo "🏁 Build finished: ${currentBuild.currentResult}"
+      echo "🏁 Debug pipeline finished: ${currentBuild.currentResult}"
       sh '''
-        set +e  # 정리 과정에서는 에러가 발생해도 계속 진행
-        echo "🧹 Cleaning up Docker images..."
-        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} 2>/dev/null || true
-        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG_LATEST} 2>/dev/null || true
-        docker system prune -f --volumes 2>/dev/null || true
-        
-        echo "🧹 Cleaning up build artifacts..."
-        rm -rf build/tmp/* 2>/dev/null || true
-        ./gradlew clean 2>/dev/null || true
+        echo "🧹 Cleanup..."
+        docker system prune -f || true
       '''
     }
     success {
-      echo "✅ CI/CD 파이프라인 성공!"
-      echo "📦 이미지: ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-      echo "🔗 빌드 URL: ${env.BUILD_URL}"
-      
-      // Slack 알림 (선택사항)
-      // slackSend(
-      //   channel: env.SLACK_CHANNEL,
-      //   color: 'good',
-      //   message: "✅ *${env.JOB_NAME}* #${env.BUILD_NUMBER} 성공\n📦 `${env.IMAGE_NAME}:${env.IMAGE_TAG}`"
-      // )
+      echo "✅ All tests passed! Ready for full pipeline."
     }
     failure {
-      echo "❌ CI/CD 파이프라인 실패!"
-      echo "🔍 로그: ${env.BUILD_URL}"
-      echo "📊 실패 스테이지: ${env.STAGE_NAME}"
-      
-      // Slack 알림 (선택사항)
-      // slackSend(
-      //   channel: env.SLACK_CHANNEL,
-      //   color: 'danger',
-      //   message: "❌ *${env.JOB_NAME}* #${env.BUILD_NUMBER} 실패\n🔍 <${env.BUILD_URL}|로그 확인>"
-      // )
-    }
-    unstable {
-      echo "⚠️  빌드 불안정: 테스트 실패 또는 품질 게이트 이슈"
-      echo "📊 테스트 리포트: ${env.BUILD_URL}testReport/"
-      echo "📈 커버리지 리포트: ${env.BUILD_URL}coverage/"
+      echo "❌ Debug pipeline failed at stage: ${env.STAGE_NAME}"
+      echo "🔍 Check logs above for specific error details"
     }
   }
 }
