@@ -55,8 +55,8 @@ pipeline {
       parallel {
         stage('System Check') {
           steps {
-            sh '''#!/bin/bash
-              set -euxo pipefail
+            sh '''
+              set -eux
               echo "🔍 System Information:"
               echo "JAVA_HOME=$JAVA_HOME"
               java -version
@@ -67,8 +67,8 @@ pipeline {
         }
         stage('Service Health Check') {
           steps {
-            sh '''#!/bin/bash
-              set -euxo pipefail
+            sh '''
+              set -eux
               echo "🏥 [Health Check] SonarQube"
               if curl -fsSL --max-time 10 ${SONAR_HOST_URL}/api/system/status; then
                 echo "✅ SonarQube is healthy"
@@ -114,8 +114,8 @@ pipeline {
 
     stage('Package & Test') {
       steps {
-        sh '''#!/bin/bash
-          set -euxo pipefail
+        sh '''
+          set -eux
           echo "📦 Packaging application..."
           ./gradlew build jacocoTestReport --no-daemon
         '''
@@ -150,8 +150,8 @@ pipeline {
       }
       steps {
         withSonarQubeEnv('SonarQube-Local') {
-          sh '''#!/bin/bash
-            set -euxo pipefail
+          sh '''
+            set -eux
             echo "📊 Running SonarQube analysis..."
             ./gradlew sonarqube \
               -Dsonar.host.url=${SONAR_HOST_URL} \
@@ -192,8 +192,8 @@ pipeline {
             "--label org.opencontainers.image.version=${env.IMAGE_TAG}"
           ].join(' ')
           
-          sh """#!/bin/bash
-            set -euxo pipefail
+          sh """
+            set -eux
             echo "🐳 Building Docker image..."
             docker build \\
               ${buildArgs} \\
@@ -202,7 +202,7 @@ pipeline {
               .
             
             echo "🔍 Image inspection:"
-            docker inspect ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} --format='{{json .Config.Labels}}' | jq .
+            docker inspect ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} --format='{{json .Config.Labels}}' | jq . || echo "jq not available, skipping pretty print"
             
             echo "📏 Image size:"
             docker images ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
@@ -214,8 +214,8 @@ pipeline {
     stage('Docker Push') {
       steps {
         retry(3) {
-          sh '''#!/bin/bash
-            set -euxo pipefail
+          sh '''
+            set -eux
             echo "⬆️  Pushing to registry..."
             
             # 마지막으로 registry 연결 확인
@@ -237,8 +237,8 @@ pipeline {
       parallel {
         stage('Update Manifest') {
           steps {
-            sh '''#!/bin/bash
-              set -euxo pipefail
+            sh '''
+              set -eux
               if [ -f k8s/deployment.yaml ]; then
                 echo "📝 Updating GitOps manifest..."
                 cp k8s/deployment.yaml k8s/deployment.yaml.backup
@@ -284,8 +284,8 @@ pipeline {
             expression { return env.ARGOCD_TOKEN && env.ARGOCD_APP_NAME }
           }
           steps {
-            sh '''#!/bin/bash
-              set -euxo pipefail
+            sh '''
+              set -eux
               echo "🔄 Triggering ArgoCD sync..."
               
               # ArgoCD CLI를 사용한 동기화 (ArgoCD CLI가 Jenkins 컨테이너에 설치되어 있다고 가정)
