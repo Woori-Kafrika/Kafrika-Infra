@@ -29,61 +29,80 @@ pipeline {
         
         stage('Build Docker Image') {
             steps {
-                script {
-                    def image = docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}", ".")
-                    image.tag("latest")
-                }
+                sh '''
+                    echo "🐳 Building Docker image..."
+                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                    
+                    echo "📏 Image info:"
+                    docker images ${DOCKER_IMAGE}
+                '''
             }
         }
         
         stage('Push to Registry') {
             steps {
-                script {
-                    docker.withRegistry("http://${DOCKER_REGISTRY}") {
-                        def image = docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}")
-                        image.push()
-                        image.push("latest")
-                    }
-                }
+                sh '''
+                    echo "⬆️ Pushing to registry..."
+                    
+                    # Registry 연결 확인
+                    curl -fsSL --max-time 10 http://docker-registry-local:5000/v2/ >/dev/null
+                    
+                    # 이미지 푸시
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker push ${DOCKER_IMAGE}:latest
+                    
+                    echo "✅ Images pushed successfully"
+                    echo "📦 ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    echo "📦 ${DOCKER_IMAGE}:latest"
+                '''
             }
         }
         
         stage('Update GitOps') {
             steps {
-                sh '''
-                    if [ -f k8s/deployment.yaml ]; then
-                        echo "📝 Updating GitOps manifest..."
-                        sed -i "s|image: .*kafrika-backend:.*|image: ${DOCKER_IMAGE}:${DOCKER_TAG}|g" k8s/deployment.yaml
-                        
-                        git config user.email "jenkins@company.com"
-                        git config user.name "Jenkins CI"
-                        
-                        if ! git diff --quiet k8s/deployment.yaml; then
-                            git add k8s/deployment.yaml
-                            git commit -m "🚀 Deploy kafrika-backend:${DOCKER_TAG} [skip ci]"
-                            git push origin HEAD:main
-                            echo "✅ GitOps updated successfully"
+                withCredentials([usernamePassword(credentialsId: 'github-token', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
+                    sh '''
+                        if [ -f k8s/deployment.yaml ]; then
+                            echo "📝 Updating GitOps manifest..."
+                            sed -i "s|image: .*kafrika-backend:.*|image: ${DOCKER_IMAGE}:${DOCKER_TAG}|g" k8s/deployment.yaml
+                            
+                            echo "📋 Updated deployment.yaml:"
+                            grep -A2 -B2 "image:" k8s/deployment.yaml || true
+                            
+                            git config user.email "jenkins@company.com"
+                            git config user.name "Jenkins CI"
+                            
+                            if ! git diff --quiet k8s/deployment.yaml; then
+                                git add k8s/deployment.yaml
+                                git commit -m "🚀 Deploy kafrika-backend:${DOCKER_TAG} [skip ci]"
+                                
+                                # GitHub 인증을 위해 URL에 토큰 포함
+                                git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Woori-Kafrika/Kafrika-Infra.git
+                                git push origin HEAD:main
+                                
+                                echo "✅ GitOps updated successfully"
+                            else
+                                echo "ℹ️ No changes to commit"
+                            fi
                         else
-                            echo "ℹ️ No changes to commit"
+                            echo "⚠️ k8s/deployment.yaml not found"
+                            find . -name "*.yaml" -o -name "*.yml" | head -10
                         fi
-                    else
-                        echo "⚠️ k8s/deployment.yaml not found"
-                    fi
-                '''
+                    '''
+                }
             }
         }
     }
     
     post {
         always {
-            script {
-                sh '''
-                    echo "🧹 Cleanup..."
-                    docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true
-                    docker rmi ${DOCKER_IMAGE}:latest || true
-                    docker system prune -f || true
-                '''
-            }
+            sh '''
+                echo "🧹 Cleanup..."
+                docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true
+                docker rmi ${DOCKER_IMAGE}:latest || true
+                docker system prune -f || true
+            '''
         }
         success {
             echo "✅ CI/CD 파이프라인 성공! 🎉"
