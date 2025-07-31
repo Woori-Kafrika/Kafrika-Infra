@@ -30,7 +30,7 @@ pipeline {
                 archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true
                 
                 // 테스트 결과
-                junit testResultsPattern: 'build/test-results/test/*.xml', allowEmptyResults: true
+                junit testResults: 'build/test-results/test/*.xml', allowEmptyResults: true
             }
         }
         
