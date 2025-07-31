@@ -135,16 +135,15 @@ pipeline {
     }
   }
 
-  post {
-    always {
-      node {
-        echo "Build finished: ${currentBuild.currentResult}"
-        sh """
-          docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
-          docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
-        """
-      }
-    }
+ post {
+  always {
+    echo "Build finished: ${currentBuild.currentResult}"
+
+    sh """
+      docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
+      docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
+    """
+  }
 
     success {
       echo "✅ CI/CD 파이프라인 성공!"
