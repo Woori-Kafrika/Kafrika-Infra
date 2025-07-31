@@ -137,12 +137,13 @@ pipeline {
 
   post {
     always {
-      echo "Build finished: ${currentBuild.currentResult}"
-
-      sh """
-        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
-        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
-      """
+      node {
+        echo "Build finished: ${currentBuild.currentResult}"
+        sh """
+          docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
+          docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
+        """
+      }
     }
 
     success {
