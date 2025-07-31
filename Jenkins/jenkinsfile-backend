@@ -45,7 +45,6 @@ pipeline {
         }
         stage('Check Network') {
           steps {
-            // ping 대신 curl이나 nc 사용
             sh 'curl -f http://sonarqube-local:9000/api/system/status || echo "SonarQube not reachable"'
             sh 'curl -f http://docker-registry-local:5000/v2/ || echo "Registry not reachable"'
           }
@@ -55,11 +54,24 @@ pipeline {
     
     stage('Prepare') {
       steps {
-        // gradlew 권한 설정
-        sh 'chmod +x gradlew'
-        sh 'echo "Gradle version:"'
-        sh './gradlew --version'
-        sh './gradlew dependencies --no-daemon'
+        sh 'echo "Checking Gradle installation..."'
+        
+        // gradlew 또는 시스템 gradle 사용 결정
+        script {
+          try {
+            sh 'chmod 755 gradlew'
+            sh 'sh gradlew --version'
+            env.GRADLE_CMD = 'sh gradlew'
+            echo "✅ Using gradlew wrapper"
+          } catch (Exception e) {
+            echo "⚠️  gradlew wrapper failed, using system gradle"
+            sh 'gradle --version'
+            env.GRADLE_CMD = 'gradle'
+          }
+        }
+        
+        sh 'echo "Using Gradle command: ${GRADLE_CMD}"'
+        sh '${GRADLE_CMD} dependencies --no-daemon'
       }
     }
     
@@ -67,17 +79,16 @@ pipeline {
       parallel {
         stage('Build') {
           steps {
-            sh './gradlew clean build -x test --no-daemon'
+            sh '${GRADLE_CMD} clean build -x test --no-daemon'
             archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true, allowEmptyArchive: true
           }
         }
         stage('Unit Tests') {
           steps {
-            sh './gradlew test jacocoTestReport --no-daemon'
+            sh '${GRADLE_CMD} test jacocoTestReport --no-daemon'
           }
           post {
             always {
-              // 조건부로 테스트 결과 발행
               script {
                 if (fileExists('build/test-results/test/*.xml')) {
                   publishTestResults testResultsPattern: 'build/test-results/test/*.xml'
@@ -100,20 +111,20 @@ pipeline {
       }
       steps {
         withSonarQubeEnv('SonarQube') {
-          sh """
-            ./gradlew sonarqube \
+          sh '''
+            ${GRADLE_CMD} sonarqube \
               -Dsonar.projectKey=kafrika-backend \
               -Dsonar.projectName="Kafrika Backend" \
-              -Dsonar.projectVersion=${env.BUILD_NUMBER} \
+              -Dsonar.projectVersion=${BUILD_NUMBER} \
               -Dsonar.sources=src/main/java \
               -Dsonar.tests=src/test/java \
               -Dsonar.java.binaries=build/classes \
               -Dsonar.java.test.binaries=build/test-classes \
               -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
-              -Dsonar.host.url=$SONAR_HOST_URL \
-              -Dsonar.login=$SONAR_TOKEN \
+              -Dsonar.host.url=${SONAR_HOST_URL} \
+              -Dsonar.login=${SONAR_TOKEN} \
               --no-daemon
-          """
+          '''
         }
       }
     }
@@ -133,7 +144,7 @@ pipeline {
     
     stage('Security Scan') {
       steps {
-        sh './gradlew dependencyCheckAnalyze --no-daemon || true'
+        sh '${GRADLE_CMD} dependencyCheckAnalyze --no-daemon || true'
       }
       post {
         always {
@@ -147,40 +158,40 @@ pipeline {
         stage('Docker Build') {
           steps {
             script {
-              sh """
+              sh '''
                 docker build \
-                  --build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-                  --build-arg VCS_REF=\$(git rev-parse HEAD) \
+                  --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+                  --build-arg VCS_REF=$(git rev-parse HEAD) \
                   --build-arg VERSION=${IMAGE_TAG} \
                   -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
                   -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest \
                   .
-              """
+              '''
             }
           }
         }
         
         stage('Docker Security Scan') {
           steps {
-            sh """
+            sh '''
               docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                -v \$(pwd):/tmp/.trivy \
+                -v $(pwd):/tmp/.trivy \
                 aquasec/trivy:latest image \
                 --exit-code 0 \
                 --severity HIGH,CRITICAL \
                 --format table \
                 ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
-            """
+            '''
           }
         }
         
         stage('Docker Push') {
           steps {
             retry(3) {
-              sh """
+              sh '''
                 docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
                 docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
-              """
+              '''
             }
           }
         }
@@ -190,11 +201,11 @@ pipeline {
     stage('GitOps Update') {
       steps {
         script {
-          sh """
+          sh '''
             if [ -f k8s/deployment.yaml ]; then
               cp k8s/deployment.yaml k8s/deployment.yaml.backup
               
-              sed -i 's|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g' k8s/deployment.yaml
+              sed -i "s|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g" k8s/deployment.yaml
               
               grep "image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" k8s/deployment.yaml || echo "Image update failed"
               
@@ -212,7 +223,7 @@ pipeline {
             else
               echo "⚠️  k8s/deployment.yaml not found, skipping GitOps update"
             fi
-          """
+          '''
         }
       }
     }
@@ -225,27 +236,27 @@ pipeline {
       }
       steps {
         script {
-          sh """
+          sh '''
             echo "🚀 Triggering ArgoCD sync for kafrika-backend..."
             
             argocd app sync kafrika-backend \
-              --auth-token \$ARGOCD_TOKEN \
-              --server \$ARGOCD_SERVER \
+              --auth-token ${ARGOCD_TOKEN} \
+              --server ${ARGOCD_SERVER} \
               --insecure \
               --timeout 300 || echo "ArgoCD sync failed"
             
             argocd app wait kafrika-backend \
-              --auth-token \$ARGOCD_TOKEN \
-              --server \$ARGOCD_SERVER \
+              --auth-token ${ARGOCD_TOKEN} \
+              --server ${ARGOCD_SERVER} \
               --insecure \
               --timeout 600 \
               --health || echo "ArgoCD wait failed"
             
             argocd app get kafrika-backend \
-              --auth-token \$ARGOCD_TOKEN \
-              --server \$ARGOCD_SERVER \
+              --auth-token ${ARGOCD_TOKEN} \
+              --server ${ARGOCD_SERVER} \
               --insecure || echo "ArgoCD get failed"
-          """
+          '''
         }
       }
     }
@@ -258,14 +269,14 @@ pipeline {
       }
       steps {
         script {
-          sh """
+          sh '''
             echo "🔍 Running post-deployment verification..."
             
             kubectl wait --for=condition=ready pod -l app=kafrika-backend --timeout=300s || echo "kubectl wait failed"
             
             kubectl get deployment kafrika-backend -o wide || echo "No kafrika-backend deployment found"
             kubectl get pods -l app=kafrika-backend || echo "No kafrika-backend pods found"
-          """
+          '''
         }
       }
     }
@@ -275,15 +286,14 @@ pipeline {
     always {
       echo "🏁 Build finished: ${currentBuild.currentResult}"
       
-      sh """
-        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
-        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
+      sh '''
+        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
+        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest || true
         docker system prune -f || true
-      """
+      '''
       
       archiveArtifacts artifacts: 'build/reports/**/*', allowEmptyArchive: true
       
-      // cleanWs 대신 수동으로 정리
       sh 'rm -rf build/tmp/* || true'
     }
     
@@ -299,13 +309,13 @@ pipeline {
       script {
         if (env.ARGOCD_TOKEN != null && env.ARGOCD_TOKEN != 'dummy-token') {
           try {
-            sh """
+            sh '''
               echo "🔄 Attempting rollback..."
               argocd app rollback kafrika-backend \
-                --auth-token \$ARGOCD_TOKEN \
-                --server \$ARGOCD_SERVER \
+                --auth-token ${ARGOCD_TOKEN} \
+                --server ${ARGOCD_SERVER} \
                 --insecure || echo "Rollback failed"
-            """
+            '''
           } catch (Exception e) {
             echo "⚠️  Rollback failed: ${e.getMessage()}"
           }
