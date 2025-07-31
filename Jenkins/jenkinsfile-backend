@@ -5,7 +5,7 @@ pipeline {
         DOCKER_REGISTRY = 'localhost:5001'
         DOCKER_IMAGE = "${DOCKER_REGISTRY}/kafrika-backend"
         DOCKER_TAG = "v${env.BUILD_NUMBER}"
-        SCANNER_HOME = tool 'SonarQube Scanner'
+        SCANNER_HOME = tool 'sonar-token'
     }
     
     stages {
@@ -35,6 +35,11 @@ pipeline {
         }
         
         stage('SonarQube Analysis') {
+            when {
+                expression {
+                    return sh(returnStatus: true, script: "curl -fsSL --max-time 5 http://sonarqube-local:9000/api/system/status") == 0
+                }
+            }
             steps {
                 withSonarQubeEnv('SonarQube-Local') {
                     sh """
@@ -53,6 +58,11 @@ pipeline {
         }
         
         stage('Quality Gate') {
+            when {
+                expression {
+                    return sh(returnStatus: true, script: "curl -fsSL --max-time 5 http://sonarqube-local:9000/api/system/status") == 0
+                }
+            }
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: false
@@ -108,12 +118,14 @@ pipeline {
     
     post {
         always {
-            sh '''
-                echo "🧹 Cleanup..."
-                docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true
-                docker rmi ${DOCKER_IMAGE}:latest || true
-                docker system prune -f || true
-            '''
+            node {
+                sh '''
+                    echo "🧹 Cleanup..."
+                    docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true
+                    docker rmi ${DOCKER_IMAGE}:latest || true
+                    docker system prune -f || true
+                '''
+            }
         }
         success {
             echo "✅ 빌드 성공! 🎉"
