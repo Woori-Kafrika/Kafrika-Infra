@@ -140,8 +140,8 @@ pipeline {
       echo "Build finished: ${currentBuild.currentResult}"
 
       sh """
-        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
-        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest || true
+        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
+        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
       """
     }
 
