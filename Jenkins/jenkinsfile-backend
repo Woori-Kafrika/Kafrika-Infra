@@ -10,7 +10,7 @@ pipeline {
   environment {
     SONAR_TOKEN = credentials('sonar-token')
     SONAR_HOST_URL = 'http://sonarqube-local:9000'
-    DOCKER_REGISTRY = 'docker-registry-local:5000'
+    DOCKER_REGISTRY = 'docker-registry-local:5001'
     IMAGE_NAME = 'kafrika-backend'
     IMAGE_TAG = "${env.BUILD_NUMBER}"
     ARGOCD_SERVER = 'localhost:8080'
@@ -35,7 +35,7 @@ pipeline {
         sh 'java -version'
         sh 'docker --version'
         sh 'curl -f http://sonarqube-local:9000/api/system/status || echo "SonarQube not reachable"'
-        sh 'curl -f http://docker-registry-local:5000/v2/ || echo "Registry not reachable"'
+        sh 'curl -f http://docker-registry-local:5001/v2/ || echo "Registry not reachable"'
       }
     }
     
