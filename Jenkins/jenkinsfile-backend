@@ -55,7 +55,7 @@ pipeline {
       parallel {
         stage('System Check') {
           steps {
-            sh '''
+            sh '''#!/bin/bash
               set -euxo pipefail
               echo "🔍 System Information:"
               echo "JAVA_HOME=$JAVA_HOME"
@@ -67,7 +67,7 @@ pipeline {
         }
         stage('Service Health Check') {
           steps {
-            sh '''
+            sh '''#!/bin/bash
               set -euxo pipefail
               echo "🏥 [Health Check] SonarQube"
               if curl -fsSL --max-time 10 ${SONAR_HOST_URL}/api/system/status; then
@@ -114,7 +114,7 @@ pipeline {
 
     stage('Package & Test') {
       steps {
-        sh '''
+        sh '''#!/bin/bash
           set -euxo pipefail
           echo "📦 Packaging application..."
           ./gradlew build jacocoTestReport --no-daemon
@@ -150,7 +150,7 @@ pipeline {
       }
       steps {
         withSonarQubeEnv('SonarQube-Local') {
-          sh '''
+          sh '''#!/bin/bash
             set -euxo pipefail
             echo "📊 Running SonarQube analysis..."
             ./gradlew sonarqube \
@@ -192,7 +192,7 @@ pipeline {
             "--label org.opencontainers.image.version=${env.IMAGE_TAG}"
           ].join(' ')
           
-          sh """
+          sh """#!/bin/bash
             set -euxo pipefail
             echo "🐳 Building Docker image..."
             docker build \\
@@ -214,7 +214,7 @@ pipeline {
     stage('Docker Push') {
       steps {
         retry(3) {
-          sh '''
+          sh '''#!/bin/bash
             set -euxo pipefail
             echo "⬆️  Pushing to registry..."
             
@@ -237,7 +237,7 @@ pipeline {
       parallel {
         stage('Update Manifest') {
           steps {
-            sh '''
+            sh '''#!/bin/bash
               set -euxo pipefail
               if [ -f k8s/deployment.yaml ]; then
                 echo "📝 Updating GitOps manifest..."
@@ -284,7 +284,7 @@ pipeline {
             expression { return env.ARGOCD_TOKEN && env.ARGOCD_APP_NAME }
           }
           steps {
-            sh '''
+            sh '''#!/bin/bash
               set -euxo pipefail
               echo "🔄 Triggering ArgoCD sync..."
               
