@@ -2,7 +2,6 @@ pipeline {
   agent any
   
   options {
-    timestamps()
     buildDiscarder(logRotator(numToKeepStr: '10'))
     skipDefaultCheckout(false)
     timeout(time: 30, unit: 'MINUTES')
