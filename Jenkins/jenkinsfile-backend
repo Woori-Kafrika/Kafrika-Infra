@@ -3,8 +3,8 @@ pipeline {
   options {
     buildDiscarder(logRotator(numToKeepStr: '10'))
     skipDefaultCheckout(false)
-    timeout(time: 45, unit: 'MINUTES')  // 타임아웃 증가
-    retry(2)  // 전체 파이프라인 재시도
+    timeout(time: 45, unit: 'MINUTES')
+    retry(2)
   }
 
   environment {
@@ -17,17 +17,13 @@ pipeline {
     IMAGE_TAG       = "${env.BUILD_NUMBER}"
     IMAGE_TAG_LATEST = 'latest'
     
-    // ArgoCD 설정
     ARGOCD_SERVER   = 'localhost:8080'
     ARGOCD_TOKEN    = credentials('argocd-token')
-    ARGOCD_APP_NAME = 'kafrika-backend-app'  // ArgoCD 앱 이름
+    ARGOCD_APP_NAME = 'kafrika-backend-app'
     
-    // 빌드 최적화
     GRADLE_OPTS     = '-Dorg.gradle.daemon=false -Dorg.gradle.caching=false -Xmx2g'
     DOCKER_BUILDKIT = '1'
-    
-    // 추가 환경변수
-    SLACK_CHANNEL   = '#ci-cd-alerts'  // 알림용
+    SLACK_CHANNEL   = '#ci-cd-alerts'
   }
 
   stages {
@@ -46,7 +42,9 @@ pipeline {
           echo "  Commit: ${GIT_COMMIT_HASH}"
           echo "  Build: #${BUILD_NUMBER}"
           echo "  Timestamp: ${BUILD_TIMESTAMP}"
-          ls -la; pwd
+          ls -la && pwd
+          echo "🔧 Setting up permissions..."
+          chmod +x ./gradlew
         '''
       }
     }
@@ -94,18 +92,18 @@ pipeline {
         stage('Compile') {
           steps {
             sh '''
-              set -euxo pipefail
+              set -eux
               echo "🔨 Building application..."
-              ./gradlew clean compileJava --no-daemon --parallel
+              bash ./gradlew clean compileJava --no-daemon --parallel
             '''
           }
         }
         stage('Static Analysis') {
           steps {
             sh '''
-              set -euxo pipefail
+              set -eux
               echo "🔍 Running static analysis..."
-              ./gradlew checkstyleMain spotbugsMain --no-daemon || echo "Static analysis completed with warnings"
+              bash ./gradlew checkstyleMain spotbugsMain --no-daemon || echo "Static analysis completed with warnings"
             '''
           }
         }
@@ -119,7 +117,6 @@ pipeline {
           echo "📦 Packaging application..."
           bash ./gradlew build jacocoTestReport --no-daemon
         '''
-        // 병렬로 아티팩트 아카이빙
         script {
           parallel(
             "Archive JAR": {
@@ -134,9 +131,7 @@ pipeline {
       }
       post {
         always {
-          // JUnit 테스트 결과 발행
           publishTestResults testResultsPattern: 'build/test-results/test/*.xml'
-          // JaCoCo 커버리지 리포트
           publishCoverage adapters: [jacocoAdapter('build/reports/jacoco/test/jacocoTestReport.xml')], sourceFileResolver: sourceFiles('STORE_LAST_BUILD')
         }
       }
@@ -165,7 +160,6 @@ pipeline {
       }
     }
 
-    // Quality Gate는 SonarQube 분석 후 별도 스테이지로
     stage('Quality Gate') {
       when {
         expression {
@@ -174,7 +168,7 @@ pipeline {
       }
       steps {
         timeout(time: 5, unit: 'MINUTES') {
-          waitForQualityGate abortPipeline: false  // 실패해도 파이프라인 중단하지 않음
+          waitForQualityGate abortPipeline: false
         }
       }
     }
@@ -307,7 +301,7 @@ pipeline {
     always {
       echo "🏁 Build finished: ${currentBuild.currentResult}"
       sh '''
-        set +e  # 정리 과정에서는 에러가 발생해도 계속 진행
+        set +e
         echo "🧹 Cleaning up Docker images..."
         docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} 2>/dev/null || true
         docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG_LATEST} 2>/dev/null || true
@@ -315,32 +309,18 @@ pipeline {
         
         echo "🧹 Cleaning up build artifacts..."
         rm -rf build/tmp/* 2>/dev/null || true
-        ./gradlew clean 2>/dev/null || true
+        bash ./gradlew clean 2>/dev/null || true
       '''
     }
     success {
       echo "✅ CI/CD 파이프라인 성공!"
       echo "📦 이미지: ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
       echo "🔗 빌드 URL: ${env.BUILD_URL}"
-      
-      // Slack 알림 (선택사항)
-      // slackSend(
-      //   channel: env.SLACK_CHANNEL,
-      //   color: 'good',
-      //   message: "✅ *${env.JOB_NAME}* #${env.BUILD_NUMBER} 성공\n📦 `${env.IMAGE_NAME}:${env.IMAGE_TAG}`"
-      // )
     }
     failure {
       echo "❌ CI/CD 파이프라인 실패!"
       echo "🔍 로그: ${env.BUILD_URL}"
       echo "📊 실패 스테이지: ${env.STAGE_NAME}"
-      
-      // Slack 알림 (선택사항)
-      // slackSend(
-      //   channel: env.SLACK_CHANNEL,
-      //   color: 'danger',
-      //   message: "❌ *${env.JOB_NAME}* #${env.BUILD_NUMBER} 실패\n🔍 <${env.BUILD_URL}|로그 확인>"
-      // )
     }
     unstable {
       echo "⚠️  빌드 불안정: 테스트 실패 또는 품질 게이트 이슈"
