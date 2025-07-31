@@ -8,12 +8,12 @@ pipeline {
   }
 
   environment {
-    SONAR_TOKEN = credentials('sonar-token')
     SONAR_HOST_URL = 'http://localhost:9000'
     DOCKER_REGISTRY = 'localhost:5001'
     IMAGE_NAME = 'kafrika-backend'
     IMAGE_TAG = "${env.BUILD_NUMBER}"
     ARGOCD_SERVER = 'localhost:8080'
+    SONARQUBE_ENV = 'SonarQube' // Jenkins > Configure System에 등록된 이름
     ARGOCD_TOKEN = credentials('argocd-token')
   }
 
@@ -51,27 +51,27 @@ pipeline {
 
     stage('SonarQube Analysis') {
       steps {
-        withSonarQubeEnv('SonarQube') {
-          sh '''
-            ./gradlew sonarqube \
-              -Dsonar.projectKey=kafrika-backend \
-              -Dsonar.projectName="Kafrika Backend" \
-              -Dsonar.projectVersion=1.0 \
-              -Dsonar.sources=src/main/java \
-              -Dsonar.tests=src/test/java \
-              -Dsonar.java.binaries=build/classes \
-              -Dsonar.java.test.binaries=build/test-classes \
-              -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
-              -Dsonar.host.url=''' + env.SONAR_HOST_URL + ''' \
-              -Dsonar.login=''' + env.SONAR_TOKEN + '''
-          '''
+        withSonarQubeEnv("${SONARQUBE_ENV}") {
+          sh """
+            ./gradlew sonarqube \\
+              -Dsonar.projectKey=kafrika-backend \\
+              -Dsonar.projectName="Kafrika Backend" \\
+              -Dsonar.projectVersion=1.0 \\
+              -Dsonar.sources=src/main/java \\
+              -Dsonar.tests=src/test/java \\
+              -Dsonar.java.binaries=build/classes \\
+              -Dsonar.java.test.binaries=build/test-classes \\
+              -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \\
+              -Dsonar.host.url=$SONAR_HOST_URL \\
+              -Dsonar.login=$SONAR_AUTH_TOKEN
+          """
         }
       }
     }
 
     stage('Quality Gate') {
       steps {
-        timeout(time: 1, unit: 'MINUTES') {
+        timeout(time: 3, unit: 'MINUTES') {
           waitForQualityGate abortPipeline: true
         }
       }
@@ -80,10 +80,10 @@ pipeline {
     stage('Docker Build') {
       steps {
         script {
-          sh '''
+          sh """
             docker build -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} .
             docker tag ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
-          '''
+          """
         }
       }
     }
@@ -91,10 +91,10 @@ pipeline {
     stage('Docker Push') {
       steps {
         script {
-          sh '''
+          sh """
             docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
             docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
-          '''
+          """
         }
       }
     }
@@ -102,32 +102,31 @@ pipeline {
     stage('Update Kubernetes Manifests') {
       steps {
         script {
-          sh '''
+          sh """
             # Update deployment.yaml with new image tag
-            sed -i 's|image: localhost:5000/kafrika-backend:latest|image: localhost:5000/kafrika-backend:${IMAGE_TAG}|g' k8s/deployment.yaml
-            
+            sed -i "s|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g" k8s/deployment.yaml
+
             # Commit and push changes
             git config user.email "jenkins@example.com"
             git config user.name "Jenkins"
             git add k8s/deployment.yaml
             git commit -m "Update image tag to ${IMAGE_TAG}" || true
             git push origin HEAD:main || true
-          '''
+          """
         }
       }
     }
 
-    stage('Deploy to Kubernetes') {
+    stage('Deploy to Kubernetes (via ArgoCD)') {
       steps {
         script {
-          sh '''
-            # Wait for ArgoCD to sync (optional)
-            echo "Waiting for ArgoCD to sync..."
-            sleep 30
-            
-            # Check deployment status
-            kubectl get pods -l app=kafrika-backend -n default
-          '''
+          sh """
+            echo "Triggering ArgoCD sync..."
+            argocd app sync kafrika-backend --auth-token $ARGOCD_TOKEN --server $ARGOCD_SERVER --insecure
+
+            echo "Waiting for ArgoCD deployment to complete..."
+            argocd app wait kafrika-backend --auth-token $ARGOCD_TOKEN --server $ARGOCD_SERVER --insecure
+          """
         }
       }
     }
@@ -141,13 +140,13 @@ pipeline {
 
   post {
     always {
-      echo "Build finished: ${currentBuild.currentResult}"
-      
-      // Cleanup Docker images
-      sh '''
-        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
-        docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest || true
-      '''
+      node {
+        echo "Build finished: ${currentBuild.currentResult}"
+        sh """
+          docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
+          docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest || true
+        """
+      }
     }
     success {
       echo "✅ CI/CD 파이프라인 성공!"
@@ -157,4 +156,4 @@ pipeline {
       echo "❌ CI/CD 파이프라인 실패!"
     }
   }
-} 
+}

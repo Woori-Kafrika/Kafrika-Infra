@@ -18,8 +18,8 @@
 
 1. **Create First Admin User** 화면에서:
    - **Username**: `admin`
-   - **Password**: 원하는 비밀번호 입력
-   - **Full name**: `Administrator`
+   - **Password**: 'admin'
+   - **Full name**: `Admin`
    - **Email address**: 이메일 주소 입력
 2. **Save and Continue** 클릭
 
