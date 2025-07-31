@@ -10,8 +10,8 @@ pipeline {
   
   environment {
     SONAR_TOKEN = credentials('sonar-token')
-    SONAR_HOST_URL = 'http://sonarqube-local:9000'  // 기존 컨테이너 이름 사용
-    DOCKER_REGISTRY = 'docker-registry-local:5000'  // 기존 컨테이너 이름 사용
+    SONAR_HOST_URL = 'http://sonarqube-local:9000'
+    DOCKER_REGISTRY = 'docker-registry-local:5000'
     IMAGE_NAME = 'kafrika-backend'
     IMAGE_TAG = "${env.BUILD_NUMBER}"
     ARGOCD_SERVER = 'localhost:8080'
@@ -67,3 +67,221 @@ pipeline {
           steps {
             sh './gradlew clean build -x test --no-daemon'
             archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true, allowEmptyArchive: true
+          }
+        }
+        stage('Unit Tests') {
+          steps {
+            sh './gradlew test jacocoTestReport --no-daemon'
+          }
+          post {
+            always {
+              publishTestResults testResultsPattern: 'build/test-results/test/*.xml'
+              publishCoverage adapters: [jacocoAdapter('build/reports/jacoco/test/jacocoTestReport.xml')], sourceFileResolver: sourceFiles('STORE_LAST_BUILD')
+            }
+          }
+        }
+      }
+    }
+    
+    stage('Code Quality') {
+      steps {
+        withSonarQubeEnv('SonarQube') {
+          sh """
+            ./gradlew sonarqube \
+              -Dsonar.projectKey=kafrika-backend \
+              -Dsonar.projectName="Kafrika Backend" \
+              -Dsonar.projectVersion=${env.BUILD_NUMBER} \
+              -Dsonar.sources=src/main/java \
+              -Dsonar.tests=src/test/java \
+              -Dsonar.java.binaries=build/classes \
+              -Dsonar.java.test.binaries=build/test-classes \
+              -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
+              -Dsonar.host.url=$SONAR_HOST_URL \
+              -Dsonar.login=$SONAR_TOKEN \
+              --no-daemon
+          """
+        }
+      }
+    }
+    
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 5, unit: 'MINUTES') {
+          waitForQualityGate abortPipeline: true
+        }
+      }
+    }
+    
+    stage('Security Scan') {
+      steps {
+        sh './gradlew dependencyCheckAnalyze --no-daemon || true'
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'build/reports/dependency-check-report.html', allowEmptyArchive: true
+        }
+      }
+    }
+    
+    stage('Docker Operations') {
+      stages {
+        stage('Docker Build') {
+          steps {
+            script {
+              sh """
+                docker build \
+                  --build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+                  --build-arg VCS_REF=\$(git rev-parse HEAD) \
+                  --build-arg VERSION=${IMAGE_TAG} \
+                  -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                  -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest \
+                  .
+              """
+            }
+          }
+        }
+        
+        stage('Docker Security Scan') {
+          steps {
+            sh """
+              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                -v \$(pwd):/tmp/.trivy \
+                aquasec/trivy:latest image \
+                --exit-code 0 \
+                --severity HIGH,CRITICAL \
+                --format table \
+                ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
+            """
+          }
+        }
+        
+        stage('Docker Push') {
+          steps {
+            retry(3) {
+              sh """
+                docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
+              """
+            }
+          }
+        }
+      }
+    }
+    
+    stage('GitOps Update') {
+      steps {
+        script {
+          sh """
+            cp k8s/deployment.yaml k8s/deployment.yaml.backup
+            
+            sed -i 's|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g' k8s/deployment.yaml
+            
+            grep "image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" k8s/deployment.yaml
+            
+            git config user.email "jenkins@company.com"
+            git config user.name "Jenkins CI"
+            
+            if ! git diff --quiet k8s/deployment.yaml; then
+              git add k8s/deployment.yaml
+              git commit -m "🚀 Deploy kafrika-backend:${IMAGE_TAG} [skip ci]"
+              git push origin HEAD:main
+              echo "✅ GitOps repository updated successfully"
+            else
+              echo "ℹ️  No changes to commit"
+            fi
+          """
+        }
+      }
+    }
+    
+    stage('Deploy to Kubernetes') {
+      steps {
+        script {
+          sh """
+            echo "🚀 Triggering ArgoCD sync for kafrika-backend..."
+            
+            argocd app sync kafrika-backend \
+              --auth-token $ARGOCD_TOKEN \
+              --server $ARGOCD_SERVER \
+              --insecure \
+              --timeout 300
+            
+            argocd app wait kafrika-backend \
+              --auth-token $ARGOCD_TOKEN \
+              --server $ARGOCD_SERVER \
+              --insecure \
+              --timeout 600 \
+              --health
+            
+            argocd app get kafrika-backend \
+              --auth-token $ARGOCD_TOKEN \
+              --server $ARGOCD_SERVER \
+              --insecure
+          """
+        }
+      }
+    }
+    
+    stage('Post-Deploy Verification') {
+      steps {
+        script {
+          sh """
+            echo "🔍 Running post-deployment verification..."
+            
+            kubectl wait --for=condition=ready pod -l app=kafrika-backend --timeout=300s
+            
+            kubectl get deployment kafrika-backend -o wide
+            kubectl get pods -l app=kafrika-backend
+          """
+        }
+      }
+    }
+  }
+  
+  post {
+    always {
+      echo "🏁 Build finished: ${currentBuild.currentResult}"
+      
+      sh """
+        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
+        docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
+        docker system prune -f || true
+      """
+      
+      archiveArtifacts artifacts: 'build/reports/**/*', allowEmptyArchive: true
+      
+      cleanWs(cleanWhenNotBuilt: false,
+              deleteDirs: true,
+              disableDeferredWipeout: true,
+              notFailBuild: true)
+    }
+    
+    success {
+      echo "✅ CI/CD 파이프라인 성공!"
+      echo "🚀 kafrika-backend:${env.IMAGE_TAG} 이 Kubernetes에 성공적으로 배포되었습니다."
+    }
+    
+    failure {
+      echo "❌ CI/CD 파이프라인 실패!"
+      echo "🔍 로그를 확인하여 문제를 해결하세요: ${env.BUILD_URL}"
+      
+      script {
+        try {
+          sh """
+            echo "🔄 Attempting rollback..."
+            argocd app rollback kafrika-backend \
+              --auth-token $ARGOCD_TOKEN \
+              --server $ARGOCD_SERVER \
+              --insecure
+          """
+        } catch (Exception e) {
+          echo "⚠️  Rollback failed: ${e.getMessage()}"
+        }
+      }
+    }
+    
+    unstable {
+      echo "⚠️  빌드가 불안정합니다. 테스트 결과를 확인하세요."
+    }
+  }
+}
