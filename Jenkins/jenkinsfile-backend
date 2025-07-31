@@ -27,7 +27,6 @@ pipeline {
     DOCKER_BUILDKIT = '1'
     
     // 추가 환경변수
-    GIT_REPO_URL    = scm.userRemoteConfigs[0].url
     SLACK_CHANNEL   = '#ci-cd-alerts'  // 알림용
   }
 
@@ -39,6 +38,7 @@ pipeline {
           env.GIT_COMMIT_HASH = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
           env.GIT_BRANCH = sh(returnStdout: true, script: 'git branch --show-current').trim()
           env.BUILD_TIMESTAMP = sh(returnStdout: true, script: 'date -u +"%Y%m%d_%H%M%S"').trim()
+          env.GIT_REPO_URL = scm.userRemoteConfigs[0].url
         }
         sh '''
           echo "📋 Build Information:"
