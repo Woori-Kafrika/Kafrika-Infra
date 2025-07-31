@@ -61,6 +61,7 @@ pipeline {
               echo "JAVA_HOME=$JAVA_HOME"
               java -version
               docker --version
+              chmod +x ./gradlew
               ./gradlew --version
             '''
           }
@@ -117,6 +118,7 @@ pipeline {
         sh '''
           set -eux
           echo "📦 Packaging application..."
+          chmod +x ./gradlew
           ./gradlew build jacocoTestReport --no-daemon
         '''
         // 병렬로 아티팩트 아카이빙
@@ -153,6 +155,7 @@ pipeline {
           sh '''
             set -eux
             echo "📊 Running SonarQube analysis..."
+            chmod +x ./gradlew
             ./gradlew sonarqube \
               -Dsonar.host.url=${SONAR_HOST_URL} \
               -Dsonar.login=${SONAR_TOKEN} \
