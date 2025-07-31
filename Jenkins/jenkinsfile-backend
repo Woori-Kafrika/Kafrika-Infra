@@ -1,157 +1,69 @@
 pipeline {
   agent any
-
+  
   options {
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '10'))
     skipDefaultCheckout(false)
+    timeout(time: 30, unit: 'MINUTES')
   }
-
+  
   environment {
-    SONAR_TOKEN = credentials('sonar-token') // Jenkins에 등록 필요
-    SONAR_HOST_URL = 'http://localhost:9000'
-    DOCKER_REGISTRY = 'localhost:5001'
+    SONAR_TOKEN = credentials('sonar-token')
+    SONAR_HOST_URL = 'http://sonarqube-local:9000'  // 기존 컨테이너 이름 사용
+    DOCKER_REGISTRY = 'docker-registry-local:5000'  // 기존 컨테이너 이름 사용
     IMAGE_NAME = 'kafrika-backend'
     IMAGE_TAG = "${env.BUILD_NUMBER}"
     ARGOCD_SERVER = 'localhost:8080'
-    ARGOCD_TOKEN = credentials('argocd-token') // Jenkins에 등록 필요
+    ARGOCD_TOKEN = credentials('argocd-token')
+    
+    GRADLE_OPTS = '-Dorg.gradle.daemon=false -Dorg.gradle.caching=false'
+    DOCKER_BUILDKIT = '1'
   }
-
+  
   stages {
     stage('Checkout') {
       steps {
         checkout scm
+        sh 'ls -la'
       }
     }
-
-    stage('Check Java') {
-      steps {
-        sh 'echo "JAVA_HOME=$JAVA_HOME"'
-        sh 'java -version'
+    
+    stage('Environment Check') {
+      parallel {
+        stage('Check Java') {
+          steps {
+            sh 'echo "JAVA_HOME=$JAVA_HOME"'
+            sh 'java -version'
+            sh 'echo "Gradle version:"'
+            sh './gradlew --version'
+          }
+        }
+        stage('Check Docker') {
+          steps {
+            sh 'docker --version'
+            sh 'docker info'
+          }
+        }
+        stage('Check Network') {
+          steps {
+            sh 'ping -c 2 sonarqube-local || echo "SonarQube not reachable"'
+            sh 'ping -c 2 docker-registry-local || echo "Registry not reachable"'
+          }
+        }
       }
     }
-
+    
     stage('Prepare') {
       steps {
         sh 'chmod +x gradlew'
+        sh './gradlew dependencies --no-daemon'
       }
     }
-
-    stage('Build') {
-      steps {
-        sh './gradlew clean build --no-daemon'
-      }
-    }
-
-    stage('Test') {
-      steps {
-        sh './gradlew test jacocoTestReport --no-daemon'
-      }
-    }
-
-    stage('SonarQube Analysis') {
-      steps {
-        withSonarQubeEnv('SonarQube') {
-          sh """
-            ./gradlew sonarqube \
-              -Dsonar.projectKey=kafrika-backend \
-              -Dsonar.projectName="Kafrika Backend" \
-              -Dsonar.projectVersion=1.0 \
-              -Dsonar.sources=src/main/java \
-              -Dsonar.tests=src/test/java \
-              -Dsonar.java.binaries=build/classes \
-              -Dsonar.java.test.binaries=build/test-classes \
-              -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
-              -Dsonar.host.url=$SONAR_HOST_URL \
-              -Dsonar.login=$SONAR_TOKEN
-          """
-        }
-      }
-    }
-
-    stage('Quality Gate') {
-      steps {
-        timeout(time: 3, unit: 'MINUTES') {
-          waitForQualityGate abortPipeline: true
-        }
-      }
-    }
-
-    stage('Docker Build') {
-      steps {
-        sh """
-          docker build -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} .
-          docker tag ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
-        """
-      }
-    }
-
-    stage('Docker Push') {
-      steps {
-        sh """
-          docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
-          docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
-        """
-      }
-    }
-
-    stage('Update Kubernetes Manifests') {
-      steps {
-        sh """
-          sed -i 's|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g' k8s/deployment.yaml
-
-          git config user.email "jenkins@example.com"
-          git config user.name "Jenkins"
-          git add k8s/deployment.yaml
-          git commit -m "Update image tag to ${IMAGE_TAG}" || true
-          git push origin HEAD:main || true
-        """
-      }
-    }
-
-    stage('Deploy to Kubernetes') {
-      steps {
-        sh """
-          echo "Waiting for ArgoCD to sync..."
-          sleep 10
-
-          argocd app sync kafrika-backend \
-            --auth-token $ARGOCD_TOKEN \
-            --server $ARGOCD_SERVER \
-            --insecure
-
-          argocd app wait kafrika-backend \
-            --auth-token $ARGOCD_TOKEN \
-            --server $ARGOCD_SERVER \
-            --insecure
-        """
-      }
-    }
-
-    stage('Archive Artifacts') {
-      steps {
-        archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true
-      }
-    }
-  }
-
- post {
-  always {
-    echo "Build finished: ${currentBuild.currentResult}"
-
-    sh """
-      docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG} || true
-      docker rmi ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest || true
-    """
-  }
-
-    success {
-      echo "✅ CI/CD 파이프라인 성공!"
-      echo "🚀 애플리케이션이 Kubernetes에 배포되었습니다."
-    }
-
-    failure {
-      echo "❌ CI/CD 파이프라인 실패!"
-    }
-  }
-}
+    
+    stage('Build & Test') {
+      parallel {
+        stage('Build') {
+          steps {
+            sh './gradlew clean build -x test --no-daemon'
+            archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true, allowEmptyArchive: true
