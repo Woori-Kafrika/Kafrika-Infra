@@ -4,11 +4,14 @@ FROM gradle:8.5-jdk17 AS builder
 WORKDIR /app
 COPY build.gradle settings.gradle ./
 COPY gradle ./gradle
+COPY gradlew gradlew.bat ./
 COPY src ./src
 
+# Build the application
 RUN gradle clean build --no-daemon -x test
 
-FROM openjdk:17-jre-slim
+# Runtime stage with correct base image
+FROM eclipse-temurin:17-jre
 
 # Add metadata
 LABEL maintainer="your-team@company.com"
@@ -16,7 +19,7 @@ LABEL version="1.0"
 LABEL description="Kafrika Backend Application"
 
 # Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /bin/false appuser
 
 WORKDIR /app
 
@@ -25,6 +28,8 @@ COPY --from=builder /app/build/libs/*.jar app.jar
 
 # Change ownership to appuser
 RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
 USER appuser
 
 # Health check
