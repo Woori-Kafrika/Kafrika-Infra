@@ -8,15 +8,14 @@ pipeline {
   }
   
   environment {
-    SONAR_TOKEN = credentials('sonar-token')
-    SONAR_HOST_URL = 'http://sonarqube-local:9000'
-    DOCKER_REGISTRY = 'docker-registry-local:5001'
-    IMAGE_NAME = 'kafrika-backend'
-    IMAGE_TAG = "${env.BUILD_NUMBER}"
-    ARGOCD_SERVER = 'localhost:8080'
-    ARGOCD_TOKEN = credentials('argocd-token')
-    
-    GRADLE_OPTS = '-Dorg.gradle.daemon=false -Dorg.gradle.caching=false'
+    SONAR_TOKEN     = credentials('sonar-token')
+    SONAR_HOST_URL  = 'http://localhost:9000'             // ← 변경: 컨테이너 DNS 대신 host 포트
+    DOCKER_REGISTRY = 'localhost:5001'                    // ← 변경: 이름 대신 localhost 사용
+    IMAGE_NAME      = 'kafrika-backend'
+    IMAGE_TAG       = "${env.BUILD_NUMBER}"
+    ARGOCD_SERVER   = 'localhost:8080'
+    ARGOCD_TOKEN    = credentials('argocd-token')
+    GRADLE_OPTS     = '-Dorg.gradle.daemon=false -Dorg.gradle.caching=false'
     DOCKER_BUILDKIT = '1'
   }
   
@@ -24,83 +23,110 @@ pipeline {
     stage('Checkout') {
       steps {
         checkout scm
-        sh 'ls -la'
-        sh 'pwd'
+        sh 'ls -la; pwd'
       }
     }
-    
+
     stage('Environment Check') {
       steps {
-        sh 'echo "JAVA_HOME=$JAVA_HOME"'
-        sh 'java -version'
-        sh 'docker --version'
-        sh 'curl -f http://sonarqube-local:9000/api/system/status || echo "SonarQube not reachable"'
-        sh 'curl -f http://docker-registry-local:5001/v2/ || echo "Registry not reachable"'
+        sh '''
+          set -euxo pipefail
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          docker --version
+
+          echo "[Preflight] SonarQube status"
+          curl -fsSL ${SONAR_HOST_URL}/api/system/status || echo "SonarQube not reachable"
+
+          echo "[Preflight] Registry /v2/ ping"
+          curl -fsSL http://${DOCKER_REGISTRY}/v2/ || echo "Registry not reachable"
+        '''
       }
     }
-    
+
     stage('Prepare') {
       steps {
-        sh 'echo "Checking Gradle installation..."'
-        
-        script {
-          try {
-            sh 'chmod 755 gradlew'
-            sh 'sh gradlew --version'
-            env.GRADLE_CMD = 'sh gradlew'
-            echo "✅ Using gradlew wrapper"
-          } catch (Exception e) {
-            echo "⚠️  gradlew wrapper failed, using system gradle"
-            sh 'gradle --version'
-            env.GRADLE_CMD = 'gradle'
-          }
-        }
-        
-        sh 'echo "Using Gradle command: ${GRADLE_CMD}"'
-        sh '${GRADLE_CMD} dependencies --no-daemon'
+        sh '''
+          set -euxo pipefail
+          echo "Checking Gradle wrapper..."
+          chmod 755 ./gradlew
+          ./gradlew --version
+        '''
       }
     }
     
     stage('Build') {
       steps {
-        sh '${GRADLE_CMD} clean build -x test --no-daemon'
+        sh '''
+          set -euxo pipefail
+          ./gradlew clean build -x test --no-daemon
+        '''
         archiveArtifacts artifacts: 'build/libs/*.jar', fingerprint: true, allowEmptyArchive: true
       }
     }
     
     stage('Test') {
       steps {
-        sh '${GRADLE_CMD} test --no-daemon'
+        sh '''
+          set -euxo pipefail
+          ./gradlew test jacocoTestReport --no-daemon
+        '''
       }
       post {
         always {
-          // 기본적인 테스트 결과만 아카이브
           archiveArtifacts artifacts: 'build/test-results/**/*', allowEmptyArchive: true
           archiveArtifacts artifacts: 'build/reports/**/*', allowEmptyArchive: true
         }
       }
     }
-    
+
+    // (선택) SonarQube 분석을 gradle로 실행하려면 아래 스테이지 추가
+    // stage('SonarQube Analysis') {
+    //   steps {
+    //     sh """
+    //       set -euxo pipefail
+    //       ./gradlew sonarqube \\
+    //         -Dsonar.projectKey=kafrika-backend \\
+    //         -Dsonar.projectName="Kafrika Backend" \\
+    //         -Dsonar.projectVersion=${IMAGE_TAG} \\
+    //         -Dsonar.host.url=${SONAR_HOST_URL} \\
+    //         -Dsonar.login=${SONAR_TOKEN} \\
+    //         -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml
+    //     """
+    //   }
+    // }
+
     stage('Docker Build') {
       steps {
-        script {
-          sh '''
-            docker build \
-              --build-arg BUILD_DATE=$(date -u +\'%Y-%m-%dT%H:%M:%SZ\') \
-              --build-arg VCS_REF=$(git rev-parse HEAD) \
-              --build-arg VERSION=${IMAGE_TAG} \
-              -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
-              -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest \
-              .
-          '''
-        }
+        sh '''
+          set -euxo pipefail
+          docker build \
+            --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --build-arg VCS_REF=$(git rev-parse HEAD) \
+            --build-arg VERSION=${IMAGE_TAG} \
+            -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+            -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest \
+            .
+        '''
       }
     }
     
+    stage('Preflight: Registry Reachability') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          echo "Checking registry: ${DOCKER_REGISTRY}"
+          curl -fsSL http://${DOCKER_REGISTRY}/v2/ >/dev/null
+          echo "Registry reachable."
+        '''
+      }
+    }
+
     stage('Docker Push') {
       steps {
         retry(3) {
           sh '''
+            set -euxo pipefail
             docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
             docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest
           '''
@@ -110,34 +136,34 @@ pipeline {
     
     stage('GitOps Update') {
       steps {
-        script {
-          sh '''
-            if [ -f k8s/deployment.yaml ]; then
-              echo "📝 Updating k8s/deployment.yaml..."
-              cp k8s/deployment.yaml k8s/deployment.yaml.backup
-              
-              sed -i "s|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g" k8s/deployment.yaml
-              
-              echo "Updated deployment.yaml:"
-              grep "image:" k8s/deployment.yaml
-              
-              git config user.email "jenkins@company.com"
-              git config user.name "Jenkins CI"
-              
-              if ! git diff --quiet k8s/deployment.yaml; then
-                git add k8s/deployment.yaml
-                git commit -m "🚀 Deploy kafrika-backend:${IMAGE_TAG} [skip ci]"
-                git push origin HEAD:main || echo "Git push failed - check credentials"
-                echo "✅ GitOps repository updated successfully"
-              else
-                echo "ℹ️  No changes to commit"
-              fi
+        sh '''
+          set -euxo pipefail
+          if [ -f k8s/deployment.yaml ]; then
+            echo "📝 Updating k8s/deployment.yaml..."
+            cp k8s/deployment.yaml k8s/deployment.yaml.backup
+
+            # image 줄 교체
+            sed -i "s|image: .*/${IMAGE_NAME}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g" k8s/deployment.yaml
+
+            echo "Updated deployment.yaml:"
+            grep -n "image:" k8s/deployment.yaml || true
+
+            git config user.email "jenkins@company.com"
+            git config user.name "Jenkins CI"
+
+            if ! git diff --quiet k8s/deployment.yaml; then
+              git add k8s/deployment.yaml
+              git commit -m "🚀 Deploy ${IMAGE_NAME}:${IMAGE_TAG} [skip ci]" || true
+              git push origin HEAD:main || echo "Git push failed - check credentials"
+              echo "✅ GitOps repository updated successfully"
             else
-              echo "⚠️  k8s/deployment.yaml not found, skipping GitOps update"
-              find . -name "*.yaml" -o -name "*.yml" | head -10
+              echo "ℹ️  No changes to commit"
             fi
-          '''
-        }
+          else
+            echo "⚠️  k8s/deployment.yaml not found, skipping GitOps update"
+            find . -name "*.yaml" -o -name "*.yml" | head -10 || true
+          fi
+        '''
       }
     }
   }
@@ -145,30 +171,25 @@ pipeline {
   post {
     always {
       echo "🏁 Build finished: ${currentBuild.currentResult}"
-      
       sh '''
+        set -euxo pipefail
         echo "🧹 Cleaning up Docker images..."
         docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} || true
         docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest || true
         docker system prune -f || true
+        rm -rf build/tmp/* || true
       '''
-      
-      sh 'rm -rf build/tmp/* || true'
     }
-    
     success {
       echo "✅ CI/CD 파이프라인 성공!"
-      echo "🚀 kafrika-backend:${env.IMAGE_TAG} 이 성공적으로 빌드되었습니다."
-      echo "📦 Docker 이미지: ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+      echo "📦 ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
     }
-    
     failure {
       echo "❌ CI/CD 파이프라인 실패!"
-      echo "🔍 로그를 확인하여 문제를 해결하세요: ${env.BUILD_URL}"
+      echo "🔍 로그: ${env.BUILD_URL}"
     }
-    
     unstable {
-      echo "⚠️  빌드가 불안정합니다. 테스트 결과를 확인하세요."
+      echo "⚠️  빌드 불안정: 테스트/커버리지 확인 필요"
     }
   }
 }
