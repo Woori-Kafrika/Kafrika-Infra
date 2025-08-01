@@ -1,12 +1,12 @@
 # Kafrika MSA Infrastructure
 
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28.15-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
-[![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5.4-6DB33F?style=for-the-badge&logo=spring-boot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-3.5-231F20?style=for-the-badge&logo=apache-kafka&logoColor=white)](https://kafka.apache.org/)
-[![Docker](https://img.shields.io/badge/Docker-26.1.3-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
-[![ArgoCD](https://img.shields.io/badge/ArgoCD-2.8.0-EF7B4D?style=for-the-badge&logo=argocd&logoColor=white)](https://argoproj.github.io/argo-cd/)
-[![Nginx](https://img.shields.io/badge/Nginx-1.24-009639?style=for-the-badge&logo=nginx&logoColor=white)](https://nginx.org/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28.15-326CE5?style=plastic&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5.4-6DB33F?style=plastic&logo=spring-boot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?style=plastic&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-3.5-231F20?style=plastic&logo=apache-kafka&logoColor=white)](https://kafka.apache.org/)
+[![Docker](https://img.shields.io/badge/Docker-26.1.3-2496ED?style=plastic&logo=docker&logoColor=white)](https://www.docker.com/)
+[![ArgoCD](https://img.shields.io/badge/ArgoCD-2.8.0-EF7B4D?style=plastic&logo=argocd&logoColor=white)](https://argoproj.github.io/argo-cd/)
+[![Nginx](https://img.shields.io/badge/Nginx-1.24-009639?style=plastic&logo=nginx&logoColor=white)](https://nginx.org/)
 
 ## 📋 프로젝트 개요
 
@@ -14,27 +14,8 @@ Kafrika는 **Microservice Architecture (MSA)** 기반의 채팅 애플리케이�
 
 ## 🏗️ 아키텍처
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   API Gateway   │    │   Auth Service  │    │   Chat Service  │
-│   (Nginx)       │    │   (Port 8082)   │    │   (Port 8081)   │
-│   Port 30512    │    │   Replicas: 2   │    │   Replicas: 2   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │   PostgreSQL    │
-                    │   (Docker)      │
-                    │   Port 5432     │
-                    └─────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │     Kafka       │
-                    │  (Message Queue)│
-                    │   Port 9092     │
-                    └─────────────────┘
-```
+<img width="719" height="472" alt="image" src="https://github.com/user-attachments/assets/13406e86-c052-4037-8d11-f9e2386c8899" />
+
 
 ## 🚀 배포된 서비스
 
