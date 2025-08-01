@@ -1,0 +1,101 @@
+spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+    group:
+      "local": "localPort, localDB, localJPA, web-mvc"
+      "dev": "devPort, devDB, devJPA, web-mvc"
+      "prod": "devPort, h2DB, prodJPA, web-mvc, prodKafka"
+---
+spring:
+  config:
+    activate:
+      on-profile: "devPort"
+
+server:
+  port: 8080
+---
+spring:
+  config:
+    activate:
+      on-profile: "devDB"
+
+  datasource:
+    url: ${DATASOURCE_URL}
+    username: ${DATASOURCE_USERNAME}
+    password: ${DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+logging:
+  level:
+    org.hibernate.sql: debug
+---
+spring:
+  config:
+    activate:
+      on-profile: "h2DB"
+
+  datasource:
+    url: jdbc:h2:mem:testdb
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  h2:
+    console:
+      enabled: true
+logging:
+  level:
+    org.hibernate.sql: debug
+---
+spring:
+  config:
+    activate:
+      on-profile: "devJPA"
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+    properties:
+      hibernate:
+        format_sql: true
+        show_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+---
+spring:
+  config:
+    activate:
+      on-profile: "prodJPA"
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        show_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+---
+spring:
+  config:
+    activate:
+      on-profile: "web-mvc"
+
+  web:
+    resources:
+      add-mappings: false
+
+  messages:
+    basename: errors
+---
+spring:
+  config:
+    activate:
+      on-profile: "prodKafka"
+
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVER:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
