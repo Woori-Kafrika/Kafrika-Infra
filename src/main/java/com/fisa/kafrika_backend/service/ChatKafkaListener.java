@@ -46,10 +46,10 @@ public class ChatKafkaListener {
                     .orElseThrow(() -> new CustomException(USER_NOT_FOUND));
 
             chattingRepository.save(ChatMessage.builder()
-                            .detailMessage(chatMessageRequest.getMessage())
-                            .chatRoom(chatRoom)
-                            .user(user)
-                            .build());
+                    .detailMessage(chatMessageRequest.getMessage())
+                    .chatRoom(chatRoom)
+                    .user(user)
+                    .build());
 
             messagingTemplate.convertAndSend("/topic/chat", chatMessageRequest);
             log.info("브로드캐스트 완료");

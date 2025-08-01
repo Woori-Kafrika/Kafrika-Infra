@@ -4,7 +4,7 @@ spring:
     group:
       "local": "localPort, localDB, localJPA, web-mvc"
       "dev": "devPort, devDB, devJPA, web-mvc"
-      "prod": "devPort, devDB, prodJPA, web-mvc"
+      "prod": "devPort, h2DB, prodJPA, web-mvc, prodKafka"
 ---
 spring:
   config:
@@ -20,10 +20,27 @@ spring:
       on-profile: "devDB"
 
   datasource:
-    url:  ${DATASOURCE_URL}
+    url: ${DATASOURCE_URL}
     username: ${DATASOURCE_USERNAME}
     password: ${DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
+logging:
+  level:
+    org.hibernate.sql: debug
+---
+spring:
+  config:
+    activate:
+      on-profile: "h2DB"
+
+  datasource:
+    url: jdbc:h2:mem:testdb
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  h2:
+    console:
+      enabled: true
 logging:
   level:
     org.hibernate.sql: debug
@@ -56,7 +73,6 @@ spring:
         show_sql: false
         dialect: org.hibernate.dialect.PostgreSQLDialect
 ---
-
 spring:
   config:
     activate:
@@ -68,9 +84,12 @@ spring:
 
   messages:
     basename: errors
-
 ---
 spring:
+  config:
+    activate:
+      on-profile: "prodKafka"
+
   kafka:
     bootstrap-servers: ${KAFKA_SERVER:localhost:9092}
     producer:

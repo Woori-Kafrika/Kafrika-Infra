@@ -25,25 +25,13 @@ spec:
             - name: SERVER_PORT
               value: "8080"
             - name: DATASOURCE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: kafrika-backend-config
-                  key: DATASOURCE_URL
+              value: "jdbc:h2:mem:testdb"
             - name: DATASOURCE_USERNAME
-              valueFrom:
-                configMapKeyRef:
-                  name: kafrika-backend-config
-                  key: DATASOURCE_USERNAME
+              value: "sa"
             - name: DATASOURCE_PASSWORD
-              valueFrom:
-                configMapKeyRef:
-                  name: kafrika-backend-config
-                  key: DATASOURCE_PASSWORD
+              value: ""
             - name: KAFKA_SERVER
-              valueFrom:
-                configMapKeyRef:
-                  name: kafrika-backend-config
-                  key: KAFKA_SERVER
+              value: "localhost:9092"
           resources:
             requests:
               memory: "256Mi"

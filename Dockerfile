@@ -16,7 +16,7 @@ COPY src ./src
 RUN gradle clean build --no-daemon -x test --parallel
 
 # 런타임 이미지
-FROM --platform=linux/amd64 openjdk:17-jre-slim
+FROM --platform=linux/amd64 eclipse-temurin:17-jre-jammy
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
