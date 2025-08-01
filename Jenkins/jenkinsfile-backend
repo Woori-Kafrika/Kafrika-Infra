@@ -29,23 +29,34 @@ pipeline {
         }
         
        stage('SonarQube Analysis') {
-          steps {
-              withSonarQubeEnv('SonarQube-Local') {   // Jenkins System에 등록한 SonarQube 서버 이름
-                  sh """
-                      ${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=kafrika-backend \
-                        -Dsonar.projectName="Kafrika Backend" \
-                        -Dsonar.sources=src/main/java \
-                        -Dsonar.tests=src/test/java \
-                        -Dsonar.java.binaries=build/classes/java/main \
-                        -Dsonar.java.test.binaries=build/classes/java/test \
-                        -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
-                        -Dsonar.junit.reportPaths=build/test-results/test \
-                        -Dsonar.branch.name=main
-                  """
-              }
+        steps {
+          withSonarQubeEnv('SonarQube-Local') {
+            script {
+              def scannerHome = tool 'sonar-scanner'
+              sh """
+                echo "Scanner path: ${scannerHome}"
+                ls -l ${scannerHome}/bin/sonar-scanner || true
+
+                # 실행 권한 부여 (noexec이면 이건 효과 없을 수 있음)
+                chmod +x ${scannerHome}/bin/sonar-scanner || true
+
+                # noexec 방지: 쉘로 실행
+                sh ${scannerHome}/bin/sonar-scanner \
+                  -Dsonar.projectKey=kafrika-backend \
+                  -Dsonar.projectName="Kafrika Backend" \
+                  -Dsonar.sources=src/main/java \
+                  -Dsonar.tests=src/test/java \
+                  -Dsonar.java.binaries=build/classes/java/main \
+                  -Dsonar.java.test.binaries=build/classes/java/test \
+                  -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
+                  -Dsonar.junit.reportPaths=build/test-results/test \
+                  -Dsonar.branch.name=main
+              """
+            }
           }
+        }
       }
+
 
         
         stage('Quality Gate') {
