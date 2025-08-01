@@ -50,7 +50,6 @@ pipeline {
                   -Dsonar.java.test.binaries=build/classes/java/test \
                   -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
                   -Dsonar.junit.reportPaths=build/test-results/test \
-                  -Dsonar.branch.name=main
               """
             }
           }
