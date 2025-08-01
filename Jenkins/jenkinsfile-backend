@@ -87,20 +87,26 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    echo "🐳 Building Docker image for x86_64..."
+                    echo "🐳 Building optimized Docker image..."
                     
-                    # 현재 시스템 아키텍처 확인
-                    echo "Building on: $(uname -m)"
+                    # Docker buildx 사용으로 캐시 최적화
+                    docker buildx create --use --name builder || true
                     
-                    # x86_64용 이미지 빌드
-                    docker build --platform linux/amd64 -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                    # 캐시와 함께 빌드
+                    docker buildx build \
+                        --platform linux/amd64 \
+                        --cache-from type=local,src=/tmp/.buildx-cache \
+                        --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                        -t ${DOCKER_IMAGE}:${DOCKER_TAG} \
+                        -t ${DOCKER_IMAGE}:latest \
+                        --load .
+                    
+                    # 캐시 디렉토리 교체
+                    rm -rf /tmp/.buildx-cache
+                    mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
                     
                     echo "📏 Image info:"
                     docker images ${DOCKER_IMAGE}
-                    
-                    # 이미지 아키텍처 확인
-                    docker image inspect ${DOCKER_IMAGE}:${DOCKER_TAG} | grep Architecture
                 '''
             }
         }
