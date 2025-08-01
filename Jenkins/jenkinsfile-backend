@@ -2,7 +2,7 @@ pipeline {
     agent any
     
     environment {
-        DOCKER_REGISTRY = 'docker.io/hongseokchoi'
+        DOCKER_REGISTRY = 'docker.io/chathongpt'  // 변경!
         DOCKER_IMAGE = "${DOCKER_REGISTRY}/kafrika-backend"
         DOCKER_TAG = "v${env.BUILD_NUMBER}"
         SCANNER_HOME = tool 'sonar-scanner'
