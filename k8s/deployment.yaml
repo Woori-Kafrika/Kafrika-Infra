@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: kafrika-backend
-          image: docker.io/chathongpt/kafrika-backend:v48
+          image: docker.io/chathongpt/kafrika-backend:v51
           ports:
             - containerPort: 8080
           env:
@@ -24,6 +24,26 @@ spec:
               value: "prod"
             - name: SERVER_PORT
               value: "8080"
+            - name: DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: kafrika-backend-config
+                  key: DATASOURCE_URL
+            - name: DATASOURCE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: kafrika-backend-config
+                  key: DATASOURCE_USERNAME
+            - name: DATASOURCE_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: kafrika-backend-config
+                  key: DATASOURCE_PASSWORD
+            - name: KAFKA_SERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: kafrika-backend-config
+                  key: KAFKA_SERVER
           resources:
             requests:
               memory: "256Mi"
