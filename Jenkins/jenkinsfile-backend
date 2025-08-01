@@ -5,7 +5,7 @@ pipeline {
         DOCKER_REGISTRY = 'localhost:5001'
         DOCKER_IMAGE = "${DOCKER_REGISTRY}/kafrika-backend"
         DOCKER_TAG = "v${env.BUILD_NUMBER}"
-        SCANNER_HOME = tool 'sonarqube-token'
+        SCANNER_HOME = tool 'sonar-scanner'
     }
     
     stages {
@@ -30,26 +30,23 @@ pipeline {
         
        stage('SonarQube Analysis') {
           steps {
-            withSonarQubeEnv('SonarQube-Local') {               // Jenkins에 등록한 SonarQube 서버 이름
-              script {
-                def scannerHome = tool 'sonar-scanner'          // Jenkins Global Tool의 실제 이름으로!
-                sh """
-                  echo "Using scanner: ${scannerHome}"
-                  ${scannerHome}/bin/sonar-scanner \
-                    -Dsonar.projectKey=kafrika-backend \
-                    -Dsonar.projectName="Kafrika Backend" \
-                    -Dsonar.sources=src/main/java \
-                    -Dsonar.tests=src/test/java \
-                    -Dsonar.java.binaries=build/classes/java/main \
-                    -Dsonar.java.test.binaries=build/classes/java/test \
-                    -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
-                    -Dsonar.junit.reportPaths=build/test-results/test \
-                    -Dsonar.branch.name=main
-                """
+              withSonarQubeEnv('SonarQube-Local') {   // Jenkins System에 등록한 SonarQube 서버 이름
+                  sh """
+                      ${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=kafrika-backend \
+                        -Dsonar.projectName="Kafrika Backend" \
+                        -Dsonar.sources=src/main/java \
+                        -Dsonar.tests=src/test/java \
+                        -Dsonar.java.binaries=build/classes/java/main \
+                        -Dsonar.java.test.binaries=build/classes/java/test \
+                        -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
+                        -Dsonar.junit.reportPaths=build/test-results/test \
+                        -Dsonar.branch.name=main
+                  """
               }
-            }
           }
-        }
+      }
+
         
         stage('Quality Gate') {
             steps {
