@@ -28,35 +28,27 @@ pipeline {
             }
         }
         
-        stage('SonarQube Analysis') {
-            steps {
-                echo "📊 Running SonarQube analysis..."
-                echo "SonarQube URL: http://localhost:9000"
-                
-                // SonarQube 연결 테스트
-                sh 'curl -fsSL http://localhost:9000/api/system/status || echo "SonarQube connection failed"'
-                
-                withSonarQubeEnv('SonarQube-Local') {
-                    sh '''
-                        echo "Setting up scanner permissions..."
-                        chmod +x ${SCANNER_HOME}/bin/sonar-scanner || echo "Scanner not found"
-                        
-                        echo "Running SonarQube analysis..."
-                        ${SCANNER_HOME}/bin/sonar-scanner \\
-                            -Dsonar.projectKey=kafrika-backend \\
-                            -Dsonar.projectName="Kafrika Backend" \\
-                            -Dsonar.sources=src/main/java \\
-                            -Dsonar.tests=src/test/java \\
-                            -Dsonar.java.binaries=build/classes/java/main \\
-                            -Dsonar.java.test.binaries=build/classes/java/test \\
-                            -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \\
-                            -Dsonar.junit.reportPaths=build/test-results/test || \\
-                        echo "SonarQube analysis failed, but continuing pipeline"
-                        
-                        echo "SonarQube analysis completed"
-                    '''
-                }
+       stage('SonarQube Analysis') {
+          steps {
+            withSonarQubeEnv('SonarQube-Local') {               // Jenkins에 등록한 SonarQube 서버 이름
+              script {
+                def scannerHome = tool 'sonar-scanner'          // Jenkins Global Tool의 실제 이름으로!
+                sh """
+                  echo "Using scanner: ${scannerHome}"
+                  ${scannerHome}/bin/sonar-scanner \
+                    -Dsonar.projectKey=kafrika-backend \
+                    -Dsonar.projectName="Kafrika Backend" \
+                    -Dsonar.sources=src/main/java \
+                    -Dsonar.tests=src/test/java \
+                    -Dsonar.java.binaries=build/classes/java/main \
+                    -Dsonar.java.test.binaries=build/classes/java/test \
+                    -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml \
+                    -Dsonar.junit.reportPaths=build/test-results/test \
+                    -Dsonar.branch.name=main
+                """
+              }
             }
+          }
         }
         
         stage('Quality Gate') {
