@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: kafrika-backend
-          image: localhost:5001/kafrika-backend:v33
+          image: localhost:5001/kafrika-backend:v34
           ports:
             - containerPort: 8080
           env:
