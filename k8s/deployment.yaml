@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: kafrika-backend
-          image: localhost:5001/kafrika-backend:v34
+          image: docker.io/chathongpt/kafrika-backend:v46
           ports:
             - containerPort: 8080
           env:
