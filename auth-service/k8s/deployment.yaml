@@ -16,32 +16,24 @@ spec:
     spec:
       containers:
         - name: auth-service
-          image: docker.io/chathongpt/auth-service:v1
+          image: chathongpt/auth-service:latest
           ports:
             - containerPort: 8082
           env:
             - name: SPRING_PROFILES_ACTIVE
-              value: "prod"
-            - name: SERVER_PORT
-              value: "8082"
-            - name: SPRING_DATASOURCE_URL
+              value: "dev"
+            - name: DATASOURCE_URL
               value: "jdbc:postgresql://postgres-service:5432/kafrika"
-            - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
-              value: "org.postgresql.Driver"
-            - name: SPRING_DATASOURCE_USERNAME
-              value: "kafrika_user"
-            - name: SPRING_DATASOURCE_PASSWORD
-              value: "kafrika_password"
-            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
-              value: "create"
-            - name: SPRING_H2_CONSOLE_ENABLED
-              value: "true"
+            - name: DATASOURCE_USERNAME
+              value: "kafrika"
+            - name: DATASOURCE_PASSWORD
+              value: "kafrika123"
           resources:
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "250m"
             limits:
-              memory: "512Mi"
+              memory: "1Gi"
               cpu: "500m"
 ---
 apiVersion: v1
